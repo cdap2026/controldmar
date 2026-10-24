@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Control Docente Remoto | Faro de Luz</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .glass-nav { background: rgba(8, 27, 56, 0.95); backdrop-filter: blur(12px); }
+  </style>
+</head>
+<body class="bg-[#050c17] text-slate-100 min-h-screen pb-12">
+
+  <!-- Modal de Seguridad Docente -->
+  <div id="authModal" class="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-amber-500/40 p-6 rounded-2xl max-w-sm w-full text-center shadow-2xl">
+      <div class="w-12 h-12 bg-amber-500/20 text-amber-400 rounded-full flex items-center justify-center mx-auto mb-3 text-2xl font-bold">🛡️</div>
+      <h2 class="text-lg font-bold text-white mb-1">Acceso Docente Faro de Luz</h2>
+      <p class="text-xs text-slate-400 mb-4">Ingresa tu clave maestra para controlar la sesión</p>
+      <input type="password" id="adminPass" placeholder="Contraseña docente" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-center text-white mb-4 focus:outline-none focus:border-amber-400">
+      <button onclick="verificarClave()" class="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-3 rounded-xl transition">Ingresar al Tablero</button>
+      <p id="authError" class="text-rose-400 text-xs mt-2 hidden">Clave incorrecta</p>
+    </div>
+  </div>
+
+  <!-- Barra Superior -->
+  <header class="glass-nav border-b border-slate-800 sticky top-0 z-40 px-4 py-3">
+    <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
+      <div>
+        <h1 class="text-base md:text-lg font-bold text-amber-400 flex items-center gap-2">
+          <span>📡</span> Monitoreo en Vivo
+        </h1>
+        <p class="text-xs text-slate-400">Docente: Cristian David Ayazo</p>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <select id="examSelector" onchange="cambiarExamen()" class="bg-slate-900 border border-slate-700 text-xs rounded-lg px-2 py-1.5 text-white">
+          <option value="evaluacion_general">Examen Activo (General)</option>
+        </select>
+        <span id="counterBadge" class="bg-blue-600/20 text-blue-300 border border-blue-500/40 text-xs px-2.5 py-1 rounded-full font-bold">
+          0 Conectados
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Controles Globales Rápidos -->
+  <main class="max-w-7xl mx-auto p-4">
+    <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 mb-6">
+      <h2 class="text-xs uppercase tracking-wider font-bold text-slate-400 mb-3">Acciones para Toda el Aula</h2>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+        <button onclick="accionMasiva('DESBLOQUEAR_TIEMPO')" class="bg-blue-600 hover:bg-blue-500 py-2.5 px-3 rounded-xl font-semibold">⏱️ Desbloquear Todos</button>
+        <button onclick="accionMasiva('PERDONAR_PENALIZACION')" class="bg-amber-600 hover:bg-amber-500 py-2.5 px-3 rounded-xl font-semibold">🛡️ Perdonar a Todos</button>
+        <button onclick="accionMasiva('APAGAR_SONOMETRO')" class="bg-purple-600 hover:bg-purple-500 py-2.5 px-3 rounded-xl font-semibold">🔇 Apagar Sonómetro</button>
+        <button onclick="accionMasiva('FINALIZAR_EXAMEN')" class="bg-rose-700 hover:bg-rose-600 py-2.5 px-3 rounded-xl font-semibold">🛑 Enviar y Cerrar Todos</button>
+      </div>
+    </div>
+
+    <!-- Cuadrícula Dinámica de Estudiantes -->
+    <div id="studentsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  </main>
+
+  <script>
+    const FIREBASE_URL = "https://faro-luz-evaluaciones-default-rtdb.firebaseio.com/";
+    firebase.initializeApp({ databaseURL: FIREBASE_URL });
+    const db = firebase.database();
+    let currentExamId = "evaluacion_general";
+    let estudiantesActuales = {};
+
+    function verificarClave() {
+      const pass = document.getElementById('adminPass').value;
+      if (pass === "dmar2026" || pass === "0323") {
+        document.getElementById('authModal').classList.add('hidden');
+        iniciarEscuchaRemota();
+      } else {
+        document.getElementById('authError').classList.remove('hidden');
+      }
+    }
+
+    function cambiarExamen() {
+      currentExamId = document.getElementById('examSelector').value;
+      iniciarEscuchaRemota();
+    }
+
+    function iniciarEscuchaRemota() {
+      db.ref(`exams/${currentExamId}/students`).on('value', snapshot => {
+        estudiantesActuales = snapshot.val() || {};
+        renderizarEstudiantes();
+      });
+    }
+
+    function renderizarEstudiantes() {
+      const container = document.getElementById('studentsGrid');
+      container.innerHTML = '';
+      const ids = Object.keys(estudiantesActuales);
+      document.getElementById('counterBadge').innerText = `${ids.length} Conectados`;
+
+      if (ids.length === 0) {
+        container.innerHTML = `<div class="col-span-full text-center py-12 text-slate-500">Esperando que los estudiantes ingresen...</div>`;
+        return;
+      }
+
+      ids.forEach(id => {
+        const s = estudiantesActuales[id];
+        const card = document.createElement('div');
+        const focoOk = s.pantallaCompleta;
+        const ruidoAlto = s.ruidoPorcentaje >= 60;
+        
+        card.className = "bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg flex flex-col justify-between";
+        card.innerHTML = `
+          <div>
+            <div class="flex justify-between items-start mb-2">
+              <div>
+                <h3 class="font-bold text-white text-base">${s.nombre || 'Sin nombre'}</h3>
+                <span class="text-[11px] text-slate-400">${s.grado || 'Grado no definido'}</span>
+              </div>
+              <div class="flex flex-col gap-1 items-end">
+                <span class="text-[10px] px-2 py-0.5 rounded-full font-bold ${focoOk ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800 animate-pulse'}">
+                  ${focoOk ? 'EN FOCO' : '⚠️ FUERA DE PANTALLA'}
+                </span>
+                <span class="text-[10px] px-2 py-0.5 rounded-full font-bold ${ruidoAlto ? 'bg-rose-950 text-rose-400 border border-rose-800' : 'bg-slate-800 text-slate-300'}">
+                  🎤 ${s.ruidoPorcentaje || 0}%
+                </span>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 bg-slate-950/70 p-2.5 rounded-xl text-center text-xs mb-3 border border-slate-800">
+              <div>
+                <p class="text-slate-400 text-[10px]">Pregunta</p>
+                <b class="text-white text-sm">${s.preguntaActual || 1}/${s.totalPreguntas || 15}</b>
+              </div>
+              <div>
+                <p class="text-slate-400 text-[10px]">Penalizaciones</p>
+                <b class="${s.totalPenalizaciones > 0 ? 'text-rose-400' : 'text-slate-300'} text-sm">${s.totalPenalizaciones || 0}</b>
+              </div>
+              <div>
+                <p class="text-slate-400 text-[10px]">Nota Actual</p>
+                <b class="text-amber-400 text-sm">${parseFloat(s.notaCalculada || 0).toFixed(2)}</b>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-4 gap-1 text-[11px] pt-2 border-t border-slate-800/80">
+            <button onclick="enviarComando('${id}', 'DESBLOQUEAR_TIEMPO')" class="bg-blue-600/90 hover:bg-blue-600 py-2 rounded-lg font-medium text-white">⏱️ Tiempo</button>
+            <button onclick="enviarComando('${id}', 'AVANZAR_PREGUNTA')" class="bg-indigo-600/90 hover:bg-indigo-600 py-2 rounded-lg font-medium text-white">⏭️ Pasar</button>
+            <button onclick="enviarComando('${id}', 'PERDONAR_PENALIZACION')" class="bg-amber-600/90 hover:bg-amber-600 py-2 rounded-lg font-medium text-white">🛡️ Perdonar</button>
+            <button onclick="enviarComando('${id}', 'FINALIZAR_EXAMEN')" class="bg-rose-700/90 hover:bg-rose-700 py-2 rounded-lg font-medium text-white">🛑 Cerrar</button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function enviarComando(studentId, accion) {
+      db.ref(`exams/${currentExamId}/commands/${studentId}`).set({
+        accion: accion,
+        ejecutado: false,
+        timestamp: Date.now()
+      });
+    }
+
+    function accionMasiva(accion) {
+      if (!confirm(`¿Deseas aplicar la acción "${accion}" a TODOS los estudiantes conectados?`)) return;
+      Object.keys(estudiantesActuales).forEach(id => enviarComando(id, accion));
+    }
+  </script>
+</body>
+</html>
